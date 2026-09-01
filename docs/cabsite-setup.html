@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>CABSITE Backend — Setup &amp; Operations</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 20mm 16mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 10.5pt; line-height: 1.55; color: #1a1a1a; margin: 0;
+  }
+  h1 { font-size: 25pt; margin: 0 0 4pt; letter-spacing: -0.4pt; color: #151D2B; }
+  h2 {
+    font-size: 14pt; margin: 22pt 0 8pt; padding-bottom: 4pt;
+    border-bottom: 2px solid #25354C; color: #151D2B; page-break-after: avoid;
+  }
+  h3 { font-size: 11.5pt; margin: 14pt 0 5pt; color: #25354C; page-break-after: avoid; }
+  p, li { orphans: 3; widows: 3; }
+  code {
+    font-family: Consolas, "Courier New", monospace; font-size: 9.2pt;
+    background: #eef1f5; padding: 1px 4px; border-radius: 3px; color: #1f3350;
+  }
+  pre {
+    font-family: Consolas, "Courier New", monospace; font-size: 8.8pt;
+    background: #151D2B; color: #e8eef7; padding: 9pt 11pt; border-radius: 5px;
+    line-height: 1.45; overflow-wrap: break-word; white-space: pre-wrap;
+    page-break-inside: avoid; margin: 7pt 0;
+  }
+  pre code { background: none; color: inherit; padding: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 8pt 0; font-size: 9.3pt; page-break-inside: avoid; }
+  th {
+    background: #25354C; color: #fff; text-align: left; padding: 5pt 7pt;
+    font-size: 8.6pt; letter-spacing: 0.5pt; text-transform: uppercase;
+  }
+  td { padding: 4.5pt 7pt; border-bottom: 1px solid #d4dbe4; vertical-align: top; }
+  tr:nth-child(even) td { background: #f6f8fa; }
+  .lead { font-size: 11pt; color: #4a5568; margin: 0 0 6pt; }
+  .rule { height: 3px; background: #25354C; margin: 10pt 0 16pt; }
+  .box {
+    border-left: 3px solid #c9a227; background: #fdf8e8;
+    padding: 7pt 11pt; margin: 9pt 0; page-break-inside: avoid;
+  }
+  .box.stop { border-left-color: #b3453f; background: #fbeeed; }
+  .box.ok { border-left-color: #3f7d54; background: #eef7f1; }
+  .box p { margin: 3pt 0; }
+  .tag {
+    display: inline-block; font-size: 7.6pt; font-weight: 700; letter-spacing: 0.6pt;
+    padding: 1.5pt 5pt; border-radius: 3px; text-transform: uppercase; vertical-align: 1.5px;
+  }
+  .tag.todo { background: #b3453f; color: #fff; }
+  .tag.done { background: #3f7d54; color: #fff; }
+  .page-break { page-break-before: always; }
+  ul, ol { padding-left: 17pt; margin: 5pt 0; }
+  li { margin: 2.5pt 0; }
+  .tree {
+    font-family: Consolas, "Courier New", monospace; font-size: 8.8pt;
+    line-height: 1.5; background: #f6f8fa; border: 1px solid #d4dbe4;
+    border-radius: 5px; padding: 9pt 11pt; white-space: pre; page-break-inside: avoid;
+  }
+  .tree .c { color: #6b7280; }
+  footer.sig { margin-top: 20pt; padding-top: 7pt; border-top: 1px solid #d4dbe4; font-size: 8.5pt; color: #6b7280; }
+</style>
+</head>
+<body>
+
+<h1>CABSITE Backend</h1>
+<p class="lead">Setup, deployment and operations. Fanart gallery with Discord login and a moderator queue, running as a single Cloudflare Worker.</p>
+<div class="rule"></div>
+
+<h2>1. What was built</h2>
+<p>The existing static site and a new backend now ship as <strong>one Cloudflare Worker</strong>. There is no second server, no separate origin, and no CORS. The DigitalOcean droplet is not involved.</p>
+
+<table>
+  <tr><th>Layer</th><th>Technology</th><th>Role</th></tr>
+  <tr><td>Static pages</td><td>Workers Assets</td><td>Serves everything in <code>public/</code></td></tr>
+  <tr><td>Backend</td><td>TypeScript + Hono</td><td><code>/auth/*</code>, <code>/api/*</code>, <code>/art/*</code></td></tr>
+  <tr><td>Sessions</td><td>KV</td><td>Session id &rarr; user id, 7 day TTL</td></tr>
+  <tr><td>Relational data</td><td>D1</td><td>Users, posts, roles</td></tr>
+  <tr><td>Image files</td><td>R2</td><td>Uploaded art, free egress</td></tr>
+  <tr><td>Login</td><td>Discord OAuth</td><td>No passwords stored</td></tr>
+  <tr><td>Bot protection</td><td>Turnstile</td><td>On the upload route</td></tr>
+</table>
+
+<h3>The rule that drives the design</h3>
+<div class="box ok">
+<p><strong>Nothing becomes public without a moderator approving it.</strong> Uploads land as <code>pending</code>. Pending images return 404 to everyone except moderators and the owner. Rejection deletes the database row and the R2 object — there is no third status and no archive.</p>
+</div>
+
+<h2>2. Where everything lives</h2>
+<div class="tree">cabini/
+├─ public/            <span class="c">← served to browsers, this is the web root</span>
+│  ├─ index.html      <span class="c">the original shrine, unchanged</span>
+│  ├─ style.css  script.js  favicon.ico  media/
+│  ├─ robots.txt  sitemap.xml
+│  ├─ gallery.html    <span class="c">+ gallery.js   approved art</span>
+│  ├─ upload.html     <span class="c">+ upload.js    submission form</span>
+│  ├─ admin.html      <span class="c">+ admin.js     moderator queue</span>
+│  ├─ owner.html      <span class="c">+ owner.js     staff management (owner only)</span>
+│  └─ nav-auth.js     <span class="c">shared nav + sign in state</span>
+├─ src/               <span class="c">← the Worker, never served to browsers</span>
+│  ├─ index.ts        <span class="c">routing, /api/me, /art/* image serving</span>
+│  ├─ auth.ts         <span class="c">Discord OAuth</span>
+│  ├─ session.ts      <span class="c">cookie → KV → D1, role guards</span>
+│  ├─ cookie.ts       <span class="c">HMAC signing</span>
+│  ├─ posts.ts        <span class="c">gallery list + upload</span>
+│  ├─ admin.ts        <span class="c">moderator queue</span>
+│  ├─ owner.ts        <span class="c">promote / demote moderators</span>
+│  ├─ turnstile.ts  image.ts  types.ts
+├─ schema.sql         <span class="c">database tables</span>
+├─ wrangler.jsonc     <span class="c">config + public vars</span>
+├─ .dev.vars          <span class="c">local secrets, gitignored</span>
+└─ .wrangler/         <span class="c">local database + files, gitignored</span></div>
+
+<div class="box">
+<p><strong>Anything you put in <code>public/</code> is publicly downloadable.</strong> That is the whole point of the folder, but it means secrets, notes and backups must never go there. Worker code in <code>src/</code> is compiled and never exposed.</p>
+</div>
+
+<div class="page-break"></div>
+<h2>3. Permission tiers</h2>
+<table>
+  <tr><th>Tier</th><th>How it is granted</th><th>Can do</th></tr>
+  <tr><td><strong>Anyone</strong></td><td>No account</td><td>View the shrine and approved art</td></tr>
+  <tr><td><strong>Member</strong></td><td>Automatic on first Discord login</td><td>Submit art for review</td></tr>
+  <tr><td><strong>Moderator</strong></td><td>Granted by the owner on the Staff page</td><td>Approve or reject submissions, preview pending art</td></tr>
+  <tr><td><strong>Owner</strong></td><td>Discord ID in <code>wrangler.jsonc</code></td><td>Everything a moderator can, plus add and remove moderators</td></tr>
+</table>
+
+<p>The owner is <strong>you</strong>, pinned to Discord ID <code>733654151107444797</code>. This is deliberately <em>not</em> stored as a database role:</p>
+<ul>
+  <li><strong>It cannot be taken.</strong> Anyone who gained write access to the database still could not make themselves owner — the check reads config, not a table.</li>
+  <li><strong>It cannot lock you out.</strong> On an empty database there are no moderators yet. Because owner comes from config, you can sign in and appoint the first one immediately.</li>
+  <li><strong>It survives a database wipe.</strong> Restore from nothing and you are still owner.</li>
+</ul>
+<p>The consequence: your row in the users table says <code>member</code>, and that is correct. Owner status is layered on top at request time.</p>
+
+<h2>4. Setup you still have to do</h2>
+<p>Everything below is required before the site works in production. Local development already works with none of it.</p>
+
+<h3><span class="tag todo">Step 1</span> &nbsp;Create the Discord application</h3>
+<ol>
+  <li>Go to <code>discord.com/developers/applications</code> and click <strong>New Application</strong>.</li>
+  <li>Open <strong>OAuth2</strong>. Copy the <strong>Client ID</strong> and reset/copy the <strong>Client Secret</strong>.</li>
+  <li>Under <strong>Redirects</strong>, add <em>both</em> of these, exactly:</li>
+</ol>
+<pre><code>http://localhost:8787/auth/callback
+https://cabinithepanini.com/auth/callback</code></pre>
+<div class="box stop">
+<p><strong>These must match character for character</strong> — including <code>http</code> vs <code>https</code> and no trailing slash. A mismatch gives an <code>invalid_redirect_uri</code> error at login and is the single most common thing to get wrong here.</p>
+</div>
+
+<h3><span class="tag todo">Step 2</span> &nbsp;Create a Turnstile widget</h3>
+<ol>
+  <li>Cloudflare dashboard &rarr; <strong>Turnstile</strong> &rarr; <strong>Add site</strong>.</li>
+  <li>Hostname <code>cabinithepanini.com</code>. Add <code>localhost</code> too if you want the real widget locally.</li>
+  <li>Copy the <strong>Site Key</strong> (public) and <strong>Secret Key</strong> (private).</li>
+</ol>
+
+<h3><span class="tag todo">Step 3</span> &nbsp;Create the Cloudflare resources</h3>
+<pre><code>npx wrangler d1 create cabsite
+npx wrangler kv namespace create SESSIONS
+npx wrangler r2 bucket create cabsite-art</code></pre>
+<p>Each command prints an ID. Paste them into <code>wrangler.jsonc</code>, replacing the <code>"local"</code> placeholders.</p>
+<div class="box">
+<p><strong>R2 is the one product that asks for billing details up front.</strong> You will not be charged — 10 GB of storage is free and egress is always free — but the card has to be on file before the bucket can be created. Everything else is on the free plan. This is why local development was built to need none of it.</p>
+</div>
+
+<h3><span class="tag todo">Step 4</span> &nbsp;Fill in the public config</h3>
+<p>In <code>wrangler.jsonc</code>, under <code>vars</code>. These are <em>not</em> secrets and are safe to commit:</p>
+<pre><code>"vars": {
+  "DISCORD_CLIENT_ID":    "your client id from step 1",
+  "DISCORD_REDIRECT_URI": "https://cabinithepanini.com/auth/callback",
+  "TURNSTILE_SITE_KEY":   "your site key from step 2",
+  "OWNER_DISCORD_ID":     "733654151107444797"
+}</code></pre>
+<div class="box stop">
+<p><strong>Two values ship as local-development defaults and will break production if left alone.</strong></p>
+<p><code>DISCORD_REDIRECT_URI</code> is currently <code>http://localhost:8787/auth/callback</code>. Deploy that and every login fails.</p>
+<p><code>TURNSTILE_SITE_KEY</code> is currently <code>1x00000000000000000000AA</code>, Cloudflare's test key that always passes. Deploy that and the bot check is decorative.</p>
+</div>
+
+<div class="page-break"></div>
+<h3><span class="tag todo">Step 5</span> &nbsp;Set the secrets</h3>
+<p>These are encrypted by Cloudflare and never appear in the repository:</p>
+<pre><code>npx wrangler secret put DISCORD_CLIENT_SECRET
+npx wrangler secret put TURNSTILE_SECRET
+npx wrangler secret put COOKIE_SECRET</code></pre>
+<p>For <code>COOKIE_SECRET</code>, paste a long random string. Generate one with:</p>
+<pre><code>node -e "console.log(crypto.randomUUID() + crypto.randomUUID())"</code></pre>
+<p>This key signs session cookies. Changing it later signs everyone out — which is also how you force a global logout if a session is ever compromised.</p>
+
+<h3><span class="tag todo">Step 6</span> &nbsp;Create the tables and deploy</h3>
+<pre><code>npx wrangler d1 execute cabsite --remote --file=./schema.sql
+npx wrangler deploy</code></pre>
+<div class="box stop">
+<p><code>schema.sql</code> begins with <code>DROP TABLE IF EXISTS</code>. Running it against a live database <strong>erases every user and post</strong>. Run it once at setup. After that, write migrations instead.</p>
+</div>
+
+<h3><span class="tag done">Step 7</span> &nbsp;Appoint your moderators</h3>
+<ol>
+  <li>Visit <code>https://cabinithepanini.com/gallery</code> and sign in with Discord.</li>
+  <li>A <strong>Staff</strong> link appears in the nav. It is visible only to you.</li>
+  <li>Have your moderators sign in once so they have an account.</li>
+  <li>On the Staff page, click <strong>Make moderator</strong> next to each.</li>
+</ol>
+<p>Role changes apply on their next request. Nobody needs to sign out and back in.</p>
+
+<h2>5. Routes</h2>
+<table>
+  <tr><th>Route</th><th>Who</th><th>What it does</th></tr>
+  <tr><td><code>GET /auth/discord</code></td><td>Anyone</td><td>Start Discord login</td></tr>
+  <tr><td><code>GET /auth/callback</code></td><td>Anyone</td><td>Finish login, create session</td></tr>
+  <tr><td><code>POST /auth/logout</code></td><td>Anyone</td><td>Destroy session</td></tr>
+  <tr><td><code>GET /api/me</code></td><td>Anyone</td><td>Current user, role, owner flag</td></tr>
+  <tr><td><code>GET /api/posts</code></td><td>Anyone</td><td>Approved art</td></tr>
+  <tr><td><code>POST /api/posts</code></td><td>Members</td><td>Turnstile check, then store as pending</td></tr>
+  <tr><td><code>GET /art/*</code></td><td>Anyone</td><td>Approved images; pending visible to staff only</td></tr>
+  <tr><td><code>GET /api/admin/posts</code></td><td>Moderators</td><td>The pending queue</td></tr>
+  <tr><td><code>POST /api/admin/posts/:id/approve</code></td><td>Moderators</td><td>Publish, record who and when</td></tr>
+  <tr><td><code>DELETE /api/admin/posts/:id</code></td><td>Moderators</td><td>Delete row and image</td></tr>
+  <tr><td><code>GET /api/owner/users</code></td><td>Owner</td><td>All accounts and roles</td></tr>
+  <tr><td><code>POST /api/owner/users/:id/role</code></td><td>Owner</td><td>Promote or demote</td></tr>
+</table>
+
+<h2>6. Upload rules</h2>
+<table>
+  <tr><th>Limit</th><th>Value</th><th>Response if broken</th></tr>
+  <tr><td>File size</td><td>5 MB</td><td>413</td></tr>
+  <tr><td>Formats</td><td>png, jpeg, gif, webp</td><td>415</td></tr>
+  <tr><td>Title</td><td>1–120 characters</td><td>400</td></tr>
+  <tr><td>Description</td><td>up to 1000 characters</td><td>400</td></tr>
+  <tr><td>Bot check</td><td>Turnstile token required</td><td>403</td></tr>
+</table>
+<p>File type is decided by reading the first bytes of the file, not by trusting what the browser claims. Renaming <code>virus.exe</code> to <code>art.png</code> does not get past it. To change the size cap, edit <code>MAX_BYTES</code> in <code>src/image.ts</code>.</p>
+
+<div class="page-break"></div>
+<h2>7. Day to day operations</h2>
+
+<h3>Local development</h3>
+<pre><code>npm install
+npm run db:init     # create tables in the local database
+npm run dev         # http://localhost:8787</code></pre>
+<p>Local mode simulates D1, KV and R2 on disk under <code>.wrangler/state</code>. Nothing touches your Cloudflare account and nothing is billed. To wipe local data and start clean:</p>
+<pre><code>rm -rf .wrangler/state
+npm run db:init</code></pre>
+
+<h3>Promote someone without the web page</h3>
+<pre><code>npx wrangler d1 execute cabsite --remote \
+  --command "UPDATE users SET role='moderator' WHERE username='NAME';"</code></pre>
+
+<h3>Look at the live data</h3>
+<pre><code>npx wrangler d1 execute cabsite --remote --command "SELECT username, role FROM users;"
+npx wrangler d1 execute cabsite --remote --command "SELECT COUNT(*) FROM posts WHERE status='pending';"
+npx wrangler tail                 # live request logs</code></pre>
+
+<h3>Back up the database</h3>
+<pre><code>npx wrangler d1 export cabsite --remote --output=backup.sql</code></pre>
+<p>D1 keeps 30 days of point-in-time recovery on paid plans. Manual exports are worth taking before any schema change.</p>
+
+<h2>8. Deliberately not built</h2>
+<table>
+  <tr><th>Item</th><th>Status</th></tr>
+  <tr><td>AI moderation</td><td>Deferred. Slots in between the Turnstile check and the database insert. If added, it may only auto-approve or defer to the queue — never auto-reject.</td></tr>
+  <tr><td>Comments, likes, follows</td><td>Out of scope</td></tr>
+  <tr><td>Email</td><td>Never. Discord identity only.</td></tr>
+  <tr><td>Auto-publishing</td><td>Never. A human approves every image.</td></tr>
+  <tr><td>Editing a submission</td><td>Not built. Reject it and have them resubmit.</td></tr>
+  <tr><td>Pagination</td><td>Not built. Both lists cap at 100 rows, which is fine until the gallery grows past that.</td></tr>
+  <tr><td>Deleting a user account</td><td>Not built. Only role changes are exposed.</td></tr>
+</table>
+
+<h2>9. When something breaks</h2>
+<table>
+  <tr><th>Symptom</th><th>Cause and fix</th></tr>
+  <tr><td><code>invalid_redirect_uri</code> at login</td><td>The Discord redirect list does not exactly match <code>DISCORD_REDIRECT_URI</code>. Compare both, character for character.</td></tr>
+  <tr><td>Signed in, but treated as signed out</td><td><code>COOKIE_SECRET</code> changed, or the 7 day session expired. Sign in again.</td></tr>
+  <tr><td>No Staff link in the nav</td><td><code>OWNER_DISCORD_ID</code> does not match the account you logged in with. Check <code>/api/me</code> and compare <code>discord_id</code>.</td></tr>
+  <tr><td>Every upload fails the bot check</td><td><code>TURNSTILE_SECRET</code> and <code>TURNSTILE_SITE_KEY</code> are from different widgets, or the site key is still the test value.</td></tr>
+  <tr><td>Gallery loads but images are blank</td><td>Those posts are still pending, or the R2 bucket ID in <code>wrangler.jsonc</code> is wrong.</td></tr>
+  <tr><td>Anything unexplained</td><td><code>npx wrangler tail</code> streams live errors from production.</td></tr>
+</table>
+
+<h2>10. Costs</h2>
+<p>Free to run at your scale. Workers allows 100,000 requests a day on the free plan; the paid plan is $5 a month if you outgrow it. R2 gives 10 GB free, then $0.015 per GB per month, and egress is always free — which is what matters for an image gallery. D1, KV and Turnstile are all covered by the free plan.</p>
+<p>At 5 MB per image, 10 GB holds roughly 2,000 submissions before storage costs anything at all.</p>
+
+<footer class="sig">CABSITE backend documentation &middot; Owner: Discord ID 733654151107444797 &middot; Generated 1 September 2026</footer>
+
+</body>
+</html>

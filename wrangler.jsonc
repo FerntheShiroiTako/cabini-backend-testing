@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cabsite",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/upload"]
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "cabinid1", "database_id": "0ed8c7e5-9ca4-41ca-bc07-715ba1440b86" }
+  ],
+  "kv_namespaces": [
+    { "binding": "SESSIONS", "id": "ecd6ee0b5c574f99afcd382aaafa3a74" }
+  ],
+  "r2_buckets": [
+    { "binding": "ART", "bucket_name": "cabini" }
+  ],
+  "vars": {
+    "DISCORD_CLIENT_ID": "1544375151494299798",
+    "DISCORD_REDIRECT_URI": "https://cabinithepanini.com/auth/callback",
+    "TURNSTILE_SITE_KEY": "0x4AAAAAAEkDRUPUwft2RUAL",
+    "OWNER_DISCORD_ID": "733654151107444797"
+  }
+}

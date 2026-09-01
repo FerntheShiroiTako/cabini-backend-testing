@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mod Queue — The Cabini Shrine</title>
+    <link rel="icon" type="image/png" href="favicon.ico">
+    <meta name="robots" content="noindex">
+    <meta name="theme-color" content="#151D2B">
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<header>
+    <h1>MOD QUEUE</h1>
+    <p>Nothing is public until you say so</p>
+</header>
+
+<nav>
+    <a href="/">Shrine</a>
+    <a href="/gallery">Gallery</a>
+    <a href="/upload">Submit art</a>
+    <a href="/panel" id="panelLink" class="hidden">My panel</a>
+    <a href="/admin" id="modLink" class="hidden">Admin</a>
+    <a href="/owner" id="ownerLink" class="hidden">Staff</a>
+    <a href="#" id="authLink">Sign in</a>
+</nav>
+
+<section>
+    <div class="card">
+        <h2>Pending submissions</h2>
+        <p id="pendingStatus">Loading...</p>
+        <div id="queue"></div>
+    </div>
+
+    <div class="card">
+        <h2>Published</h2>
+        <p id="publishedStatus">Loading...</p>
+        <div id="published"></div>
+    </div>
+</section>
+
+<footer>
+    <p class="footer-nav"><a href="/">Shrine</a><a href="/gallery">Gallery</a><a href="/upload">Submit art</a><a href="/panel">My panel</a></p>
+    <p>Created in honor of Cabini.</p>
+</footer>
+
+<script src="/js/util.js"></script>
+<script src="/js/nav-auth.js"></script>
+<script src="/js/admin.js"></script>
+</body>
+</html>

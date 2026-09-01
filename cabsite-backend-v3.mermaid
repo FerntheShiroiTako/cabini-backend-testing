@@ -1,0 +1,84 @@
+flowchart TD
+    subgraph browser["Browser"]
+        LOGIN["Login button"]
+        GALLERY["Fanart gallery<br/>approved posts only"]
+        UPLOAD["Upload form"]
+        ADMIN["Admin panel<br/>moderators only"]
+    end
+
+    subgraph external["Outside services"]
+        DISCORD["Discord OAuth"]
+        TURNSTILE["Turnstile"]
+    end
+
+    subgraph worker["Cloudflare Worker — TypeScript + Hono"]
+        ASSETS["Workers Assets<br/>serves existing CABSITE HTML/CSS"]
+        AUTHR["/auth/discord<br/>/auth/callback"]
+        SESSION["Session middleware<br/>reads signed cookie"]
+        POSTS["/api/posts<br/>GET list &nbsp; POST upload"]
+        ADMINAPI["/api/admin/*<br/>guard: role = moderator"]
+    end
+
+    subgraph pipeline["Upload pipeline"]
+        T{"Turnstile<br/>token valid?"}
+        REJECTED["Dropped<br/>never stored"]
+        PENDING["status = pending<br/>waiting on a mod"]
+        REVIEW{"Mod decision"}
+        APPROVED["status = approved<br/>now public"]
+        DELETED["Deleted<br/>row + object removed"]
+    end
+
+    subgraph storage["Cloudflare storage"]
+        KV[("KV<br/>sessions")]
+        D1[("D1<br/>users · posts · roles")]
+        R2[("R2<br/>image files")]
+    end
+
+    LOGIN -->|"1 · sign in"| AUTHR
+    AUTHR <-->|"2 · identity"| DISCORD
+    AUTHR -->|"3 · upsert user, role = member"| D1
+    AUTHR -->|"4 · write session"| KV
+
+    GALLERY -->|"page load"| ASSETS
+    GALLERY -->|"fetch approved posts"| POSTS
+    UPLOAD -->|"5 · submit art"| POSTS
+    ADMIN -->|"open queue"| ADMINAPI
+
+    POSTS --> SESSION
+    ADMINAPI --> SESSION
+    SESSION -->|"look up session"| KV
+    SESSION -->|"look up role"| D1
+
+    POSTS -->|"6 · bot check"| T
+    T -->|"no"| REJECTED
+    T -->|"yes"| PENDING
+
+    PENDING -->|"7 · insert row"| D1
+    PENDING -->|"8 · store file"| R2
+
+    ADMINAPI -->|"9 · list pending"| PENDING
+    PENDING --> REVIEW
+    REVIEW -->|"approve"| APPROVED
+    REVIEW -->|"reject"| DELETED
+    APPROVED -->|"10 · flip status"| D1
+    DELETED --> D1
+    DELETED --> R2
+
+    D1 -->|"approved rows"| GALLERY
+    R2 -->|"image URLs · free egress"| GALLERY
+
+    classDef page fill:#1e3a5f,stroke:#5b9bd5,stroke-width:2px,color:#ffffff
+    classDef route fill:#24492b,stroke:#6aa84f,stroke-width:2px,color:#ffffff
+    classDef store fill:#4a3a1e,stroke:#d9a441,stroke-width:2px,color:#ffffff
+    classDef ext fill:#3d2b3d,stroke:#b07ab0,stroke-width:2px,color:#ffffff
+    classDef gate fill:#3a3a3a,stroke:#9e9e9e,stroke-width:2px,color:#ffffff
+    classDef good fill:#1f4d3d,stroke:#4bbf8a,stroke-width:2px,color:#ffffff
+    classDef bad fill:#4d2020,stroke:#d96a6a,stroke-width:2px,color:#ffffff
+
+    class LOGIN,GALLERY,UPLOAD,ADMIN page
+    class ASSETS,AUTHR,SESSION,POSTS,ADMINAPI route
+    class KV,D1,R2 store
+    class DISCORD,TURNSTILE ext
+    class T,REVIEW,PENDING gate
+    class APPROVED good
+    class REJECTED,DELETED bad
