@@ -2,7 +2,7 @@
   "name": "cabinid1",
   "private": true,
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --port 8787",
     "typecheck": "tsc --noEmit",
     "db:init": "wrangler d1 execute DB --local --file=./schema.sql",
     "deploy": "wrangler deploy"
